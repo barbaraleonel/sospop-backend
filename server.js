@@ -23,7 +23,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.SOSPOP_PORT || 300);
 const INSTAGRAM_TOKEN = (process.env.INSTAGRAM_TOKEN || '').trim();
 const WEBHOOK_VERIFY_TOKEN = (process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026').trim();
 const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
@@ -221,4 +221,4 @@ app.get('/', (req, res) => res.json({
   conversas_ativas: Object.keys(conversas).length
 }));
 
-app.listen(PORT, () => console.log('SOSPOP rodando na porta ' + PORT));
+app.listen(PORT, '0.0.0.0', () => console.log('SOSPOP rodando na porta ' + PORT));
