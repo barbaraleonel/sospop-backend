@@ -24,10 +24,10 @@ app.use((req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const INSTAGRAM_TOKEN = process.env.INSTAGRAM_TOKEN;
-const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026';
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-6';
+const INSTAGRAM_TOKEN = (process.env.INSTAGRAM_TOKEN || '').trim();
+const WEBHOOK_VERIFY_TOKEN = (process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026').trim();
+const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
+const CLAUDE_MODEL = (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6').trim();
 
 const conversas = {};
 
@@ -46,6 +46,11 @@ Mensagens curtas (2-3 linhas). Maximo 1 emoji por mensagem.
 ESTEIRA: saudacao pelo nome, qualificacao familia/pet, apresentacao do plano ideal, ancoragem de valor, objecoes, fechamento, proximo passo.
 
 REGRAS: nunca minta sobre coberturas. Se pedir humano ou reclamar, transfira. Ofereca Ouro como primeira opcao para quem tem familia.`;
+
+function publicAnthropicError(error) {
+  const data = error.response?.data;
+  return data?.error?.message || data?.message || error.message || 'Erro desconhecido';
+}
 
 async function chamarClaude({ system, messages, maxTokens = 500 }) {
   if (!ANTHROPIC_API_KEY) {
@@ -163,8 +168,9 @@ app.post('/api/chat', async (req, res) => {
 
     res.json({ reply });
   } catch (e) {
+    const detail = publicAnthropicError(e);
     console.error('Erro /api/chat:', e.response?.data || e.message);
-    res.status(e.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao chamar a Sebastiana.' });
+    res.status(e.status || e.response?.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao chamar a Sebastiana.', detail });
   }
 });
 
@@ -192,8 +198,9 @@ app.post('/api/content', async (req, res) => {
 
     res.json(content);
   } catch (e) {
+    const detail = publicAnthropicError(e);
     console.error('Erro /api/content:', e.response?.data || e.message);
-    res.status(e.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao gerar conteudo.' });
+    res.status(e.status || e.response?.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao gerar conteudo.', detail });
   }
 });
 
