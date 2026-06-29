@@ -23,7 +23,7 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = Number(process.env.SOSPOP_PORT || process.env.PORT || 3000);
+const PORT = Number(process.env.SOSPOP_PORT || 300);
 const INSTAGRAM_TOKEN = (process.env.INSTAGRAM_TOKEN || '').trim();
 const INSTAGRAM_ACCOUNT_ID = (process.env.INSTAGRAM_ACCOUNT_ID || '').trim();
 const WEBHOOK_VERIFY_TOKEN = (process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026').trim();
