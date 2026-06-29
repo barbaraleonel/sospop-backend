@@ -31,6 +31,22 @@ const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
 const CLAUDE_MODEL = (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6').trim();
 
 const conversas = {};
+const webhookDebug = {
+  post_count: 0,
+  accepted_object_count: 0,
+  ignored_object_count: 0,
+  text_event_count: 0,
+  send_attempt_count: 0,
+  send_success_count: 0,
+  last_post_at: null,
+  last_object: null,
+  last_entry_count: 0,
+  last_messaging_count: 0,
+  last_text_event_at: null,
+  last_send_attempt_at: null,
+  last_send_success_at: null,
+  last_send_error: null
+};
 
 const PROMPT_SEBASTIANA = `Voce e a Sebastiana, consultora de vendas da SOSPOP - Beneficios e Protecao Familiar.
 
@@ -51,6 +67,12 @@ REGRAS: nunca minta sobre coberturas. Se pedir humano ou reclamar, transfira. Of
 function publicAnthropicError(error) {
   const data = error.response?.data;
   return data?.error?.message || data?.message || error.message || 'Erro desconhecido';
+}
+
+function publicGraphError(error) {
+  const data = error.response?.data?.error;
+  if (!data) return error.message || 'Erro desconhecido';
+  return [data.code, data.error_subcode, data.type, data.message].filter(Boolean).join(' | ');
 }
 
 async function chamarClaude({ system, messages, maxTokens = 500 }) {
@@ -97,8 +119,12 @@ async function chamarSebastiana(senderId, msg) {
 }
 
 async function enviar(id, texto) {
+  webhookDebug.send_attempt_count += 1;
+  webhookDebug.last_send_attempt_at = new Date().toISOString();
+
   if (!INSTAGRAM_TOKEN || !INSTAGRAM_ACCOUNT_ID) {
-    console.error('Instagram nao configurado: token ou account id ausente');
+    webhookDebug.last_send_error = 'Instagram nao configurado: token ou account id ausente';
+    console.error(webhookDebug.last_send_error);
     return;
   }
 
@@ -108,9 +134,13 @@ async function enviar(id, texto) {
       { recipient: { id }, message: { text: texto } },
       { params: { access_token: INSTAGRAM_TOKEN }, timeout: 30000 }
     );
+    webhookDebug.send_success_count += 1;
+    webhookDebug.last_send_success_at = new Date().toISOString();
+    webhookDebug.last_send_error = null;
     console.log(`Mensagem Instagram enviada para ${id}`);
   } catch (e) {
-    console.error('Erro envio Instagram:', JSON.stringify(e.response?.data || e.message));
+    webhookDebug.last_send_error = publicGraphError(e);
+    console.error('Erro envio Instagram:', webhookDebug.last_send_error);
   }
 }
 
@@ -124,8 +154,18 @@ app.get('/webhook', (req, res) => {
 
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
-  const body = req.body;
-  if (body.object !== 'instagram') return;
+  const body = req.body || {};
+  webhookDebug.post_count += 1;
+  webhookDebug.last_post_at = new Date().toISOString();
+  webhookDebug.last_object = body.object || null;
+  webhookDebug.last_entry_count = Array.isArray(body.entry) ? body.entry.length : 0;
+  webhookDebug.last_messaging_count = (body.entry || []).reduce((sum, entry) => sum + (entry.messaging || []).length, 0);
+
+  if (!['instagram', 'page'].includes(body.object)) {
+    webhookDebug.ignored_object_count += 1;
+    return;
+  }
+  webhookDebug.accepted_object_count += 1;
 
   for (const entry of body.entry || []) {
     for (const event of entry.messaging || []) {
@@ -134,6 +174,8 @@ app.post('/webhook', async (req, res) => {
       const txt = event.message?.text;
       if (!id || !txt) continue;
 
+      webhookDebug.text_event_count += 1;
+      webhookDebug.last_text_event_at = new Date().toISOString();
       console.log(`DM Instagram recebida de ${id}`);
       try {
         const resp = await chamarSebastiana(id, txt);
@@ -227,6 +269,8 @@ app.get('/debug/config', (req, res) => res.json({
   instagram_account_id: Boolean(INSTAGRAM_ACCOUNT_ID),
   webhook_verify_token: Boolean(WEBHOOK_VERIFY_TOKEN)
 }));
+
+app.get('/debug/webhook', (req, res) => res.json(webhookDebug));
 
 app.get('/', (req, res) => res.json({
   status: 'online',
