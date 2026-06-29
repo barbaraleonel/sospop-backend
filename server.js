@@ -1,4 +1,5 @@
 require('dotenv').config();
+const crypto = require('crypto');
 const express = require('express');
 const axios = require('axios');
 
@@ -26,6 +27,10 @@ app.use((req, res, next) => {
 function cleanEnv(value, fallback = '') {
   const raw = String(value || fallback).trim();
   return raw.replace(/^['"]|['"]$/g, '').trim();
+}
+
+function hash12(value) {
+  return value ? crypto.createHash('sha256').update(value).digest('hex').slice(0, 12) : null;
 }
 
 const PORT = Number(cleanEnv(process.env.SOSPOP_PORT, '300'));
@@ -74,10 +79,10 @@ function publicAnthropicError(error) {
   return data?.error?.message || data?.message || error.message || 'Erro desconhecido';
 }
 
-function publicGraphError(error) {
-  const data = error.response?.data?.error;
-  if (!data) return error.message || 'Erro desconhecido';
-  return [data.code, data.error_subcode, data.type, data.message].filter(Boolean).join(' | ');
+function publicGraphErrorFromData(data) {
+  const error = data?.error;
+  if (!error) return null;
+  return [error.code, error.error_subcode, error.type, error.message].filter(Boolean).join(' | ');
 }
 
 async function chamarClaude({ system, messages, maxTokens = 500 }) {
@@ -134,17 +139,23 @@ async function enviar(id, texto) {
   }
 
   try {
-    await axios.post(
-      `https://graph.instagram.com/v23.0/${INSTAGRAM_ACCOUNT_ID}/messages`,
-      { recipient: { id }, message: { text: texto } },
-      { params: { access_token: INSTAGRAM_TOKEN }, timeout: 30000 }
-    );
+    const url = new URL(`https://graph.instagram.com/v23.0/${INSTAGRAM_ACCOUNT_ID}/messages`);
+    url.searchParams.set('access_token', INSTAGRAM_TOKEN);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recipient: { id }, message: { text: texto } })
+    });
+    const data = await response.json().catch(() => ({}));
+    const graphError = publicGraphErrorFromData(data);
+    if (!response.ok || graphError) throw new Error(graphError || `HTTP ${response.status}`);
+
     webhookDebug.send_success_count += 1;
     webhookDebug.last_send_success_at = new Date().toISOString();
     webhookDebug.last_send_error = null;
     console.log(`Mensagem Instagram enviada para ${id}`);
   } catch (e) {
-    webhookDebug.last_send_error = publicGraphError(e);
+    webhookDebug.last_send_error = e.message || 'Erro desconhecido';
     console.error('Erro envio Instagram:', webhookDebug.last_send_error);
   }
 }
@@ -271,6 +282,8 @@ app.get('/conversas', (req, res) => {
 app.get('/debug/config', (req, res) => res.json({
   anthropic: Boolean(ANTHROPIC_API_KEY),
   instagram_token: Boolean(INSTAGRAM_TOKEN),
+  instagram_token_length: INSTAGRAM_TOKEN.length,
+  instagram_token_sha12: hash12(INSTAGRAM_TOKEN),
   instagram_account_id: Boolean(INSTAGRAM_ACCOUNT_ID),
   webhook_verify_token: Boolean(WEBHOOK_VERIFY_TOKEN)
 }));
