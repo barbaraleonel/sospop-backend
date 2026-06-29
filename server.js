@@ -23,12 +23,17 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = Number(process.env.SOSPOP_PORT || 300);
-const INSTAGRAM_TOKEN = (process.env.INSTAGRAM_TOKEN || '').trim();
-const INSTAGRAM_ACCOUNT_ID = (process.env.INSTAGRAM_ACCOUNT_ID || '').trim();
-const WEBHOOK_VERIFY_TOKEN = (process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026').trim();
-const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
-const CLAUDE_MODEL = (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6').trim();
+function cleanEnv(value, fallback = '') {
+  const raw = String(value || fallback).trim();
+  return raw.replace(/^['"]|['"]$/g, '').trim();
+}
+
+const PORT = Number(cleanEnv(process.env.SOSPOP_PORT, '300'));
+const INSTAGRAM_TOKEN = cleanEnv(process.env.INSTAGRAM_TOKEN);
+const INSTAGRAM_ACCOUNT_ID = cleanEnv(process.env.INSTAGRAM_ACCOUNT_ID);
+const WEBHOOK_VERIFY_TOKEN = cleanEnv(process.env.WEBHOOK_VERIFY_TOKEN, 'sospop2026');
+const ANTHROPIC_API_KEY = cleanEnv(process.env.ANTHROPIC_API_KEY);
+const CLAUDE_MODEL = cleanEnv(process.env.CLAUDE_MODEL, 'claude-sonnet-4-6');
 
 const conversas = {};
 const webhookDebug = {
