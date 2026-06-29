@@ -23,8 +23,9 @@ app.use((req, res, next) => {
   next();
 });
 
-const PORT = Number(process.env.SOSPOP_PORT || 300);
+const PORT = Number(process.env.SOSPOP_PORT || process.env.PORT || 3000);
 const INSTAGRAM_TOKEN = (process.env.INSTAGRAM_TOKEN || '').trim();
+const INSTAGRAM_ACCOUNT_ID = (process.env.INSTAGRAM_ACCOUNT_ID || '').trim();
 const WEBHOOK_VERIFY_TOKEN = (process.env.WEBHOOK_VERIFY_TOKEN || 'sospop2026').trim();
 const ANTHROPIC_API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
 const CLAUDE_MODEL = (process.env.CLAUDE_MODEL || 'claude-sonnet-4-6').trim();
@@ -96,14 +97,20 @@ async function chamarSebastiana(senderId, msg) {
 }
 
 async function enviar(id, texto) {
+  if (!INSTAGRAM_TOKEN || !INSTAGRAM_ACCOUNT_ID) {
+    console.error('Instagram nao configurado: token ou account id ausente');
+    return;
+  }
+
   try {
     await axios.post(
-      'https://graph.facebook.com/v19.0/me/messages',
+      `https://graph.instagram.com/v23.0/${INSTAGRAM_ACCOUNT_ID}/messages`,
       { recipient: { id }, message: { text: texto } },
-      { params: { access_token: INSTAGRAM_TOKEN } }
+      { params: { access_token: INSTAGRAM_TOKEN }, timeout: 30000 }
     );
+    console.log(`Mensagem Instagram enviada para ${id}`);
   } catch (e) {
-    console.error('Erro envio:', e.response?.data || e.message);
+    console.error('Erro envio Instagram:', JSON.stringify(e.response?.data || e.message));
   }
 }
 
@@ -127,12 +134,13 @@ app.post('/webhook', async (req, res) => {
       const txt = event.message?.text;
       if (!id || !txt) continue;
 
+      console.log(`DM Instagram recebida de ${id}`);
       try {
         const resp = await chamarSebastiana(id, txt);
         await new Promise(r => setTimeout(r, 1200));
         await enviar(id, resp);
       } catch (e) {
-        console.error('Erro Sebastiana webhook:', e.response?.data || e.message);
+        console.error('Erro Sebastiana webhook:', JSON.stringify(e.response?.data || e.message));
       }
     }
   }
@@ -169,7 +177,7 @@ app.post('/api/chat', async (req, res) => {
     res.json({ reply });
   } catch (e) {
     const detail = publicAnthropicError(e);
-    console.error('Erro /api/chat:', e.response?.data || e.message);
+    console.error('Erro /api/chat:', JSON.stringify(e.response?.data || e.message));
     res.status(e.status || e.response?.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao chamar a Sebastiana.', detail });
   }
 });
@@ -199,7 +207,7 @@ app.post('/api/content', async (req, res) => {
     res.json(content);
   } catch (e) {
     const detail = publicAnthropicError(e);
-    console.error('Erro /api/content:', e.response?.data || e.message);
+    console.error('Erro /api/content:', JSON.stringify(e.response?.data || e.message));
     res.status(e.status || e.response?.status || 500).json({ error: e.status === 503 ? e.message : 'Falha ao gerar conteudo.', detail });
   }
 });
@@ -213,11 +221,19 @@ app.get('/conversas', (req, res) => {
   res.json({ total: resumo.length, conversas: resumo });
 });
 
+app.get('/debug/config', (req, res) => res.json({
+  anthropic: Boolean(ANTHROPIC_API_KEY),
+  instagram_token: Boolean(INSTAGRAM_TOKEN),
+  instagram_account_id: Boolean(INSTAGRAM_ACCOUNT_ID),
+  webhook_verify_token: Boolean(WEBHOOK_VERIFY_TOKEN)
+}));
+
 app.get('/', (req, res) => res.json({
   status: 'online',
   sistema: 'SOSPOP Omnichannel Backend',
   sebastiana: ANTHROPIC_API_KEY ? 'ativa' : 'sem chave',
   instagram: INSTAGRAM_TOKEN ? 'configurado' : 'sem token',
+  instagram_account_id: INSTAGRAM_ACCOUNT_ID ? 'configurado' : 'sem account id',
   conversas_ativas: Object.keys(conversas).length
 }));
 
