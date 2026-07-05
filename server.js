@@ -9,6 +9,8 @@ app.use(express.json({ limit: '1mb' }));
 const FRONTEND_ORIGINS = [
   'https://sospop-cap.web.app',
   'https://sospop-cap.firebaseapp.com',
+  'https://mex-atendimentos.web.app',
+  'https://mex-atendimentos.firebaseapp.com',
   'http://localhost:3000'
 ];
 
@@ -26,7 +28,7 @@ app.use((req, res, next) => {
 
 function cleanEnv(value, fallback = '') {
   const raw = String(value || fallback).trim();
-  return raw.replace(/^['"]|['"]$/g, '').trim();
+  return raw.replace(/^[']|["]$/g, '').trim();
 }
 
 function hash12(value) {
@@ -39,6 +41,8 @@ const INSTAGRAM_ACCOUNT_ID = cleanEnv(process.env.INSTAGRAM_ACCOUNT_ID);
 const WEBHOOK_VERIFY_TOKEN = cleanEnv(process.env.WEBHOOK_VERIFY_TOKEN, 'sospop2026');
 const ANTHROPIC_API_KEY = cleanEnv(process.env.ANTHROPIC_API_KEY);
 const CLAUDE_MODEL = cleanEnv(process.env.CLAUDE_MODEL, 'claude-sonnet-4-6');
+const GEMINI_API_KEY = cleanEnv(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
+const GEMINI_IMAGE_MODEL = cleanEnv(process.env.GEMINI_IMAGE_MODEL, 'gemini-3.1-flash-image');
 
 const conversas = {};
 const webhookDebug = {
@@ -83,6 +87,39 @@ function publicGraphErrorFromData(data) {
   const error = data?.error;
   if (!error) return null;
   return [error.code, error.error_subcode, error.type, error.message].filter(Boolean).join(' | ');
+}
+
+function encontrarImagemGemini(valor) {
+  if (!valor || typeof valor !== 'object') return null;
+
+  if (valor.output_image?.data) {
+    return {
+      data: valor.output_image.data,
+      mimeType: valor.output_image.mime_type || valor.output_image.mimeType || 'image/png'
+    };
+  }
+
+  if (valor.data && (valor.mime_type || valor.mimeType)) {
+    return {
+      data: valor.data,
+      mimeType: valor.mime_type || valor.mimeType
+    };
+  }
+
+  if (Array.isArray(valor)) {
+    for (const item of valor) {
+      const imagem = encontrarImagemGemini(item);
+      if (imagem) return imagem;
+    }
+    return null;
+  }
+
+  for (const item of Object.values(valor)) {
+    const imagem = encontrarImagemGemini(item);
+    if (imagem) return imagem;
+  }
+
+  return null;
 }
 
 async function chamarClaude({ system, messages, maxTokens = 500 }) {
@@ -246,7 +283,7 @@ app.post('/api/content', async (req, res) => {
     const cleanTopic = String(topic || '').trim();
     if (!cleanTopic) return res.status(400).json({ error: 'Envie topic.' });
 
-    const system = 'Especialista em marketing para SOSPOP. Planos: Prata R$34,90 (funeral individual, clube DU, telemedicina 24h), Ouro R$69,90 MAIS ESCOLHIDO (funeral familiar, TelePet 24h), Diamante R$99,90 (reembolso R$300/ano, funeral pet). Publico: familias e pets em MS. Tom proximo e caloroso. Responda SOMENTE com JSON valido, sem markdown, no formato: {"legenda":"texto completo com emojis e hashtags","cta":"chamada curta","hashtags":["#tag1","#tag2","#tag3","#tag4"],"horario":"HH:MM","motivo_horario":"1 frase","prompt_imagem":"descricao em ingles para DALL-E"}';
+    const system = 'Especialista em marketing para MexPay. A MexPay ajuda MEIs, autonomos e pequenos comercios com maquininha, Pix, link de pagamento e cobranca digital. Nunca invente taxas, prazos ou aprovacao. Tom claro, comercial e direto. Responda SOMENTE com JSON valido, sem markdown, no formato: {"legenda":"texto completo com emojis e hashtags","cta":"chamada curta","hashtags":["#tag1","#tag2","#tag3","#tag4"],"horario":"HH:MM","motivo_horario":"1 frase","prompt_imagem":"descricao em ingles para gerar imagem publicitaria sem texto pequeno"}';
 
     const raw = await chamarClaude({
       system,
@@ -270,6 +307,60 @@ app.post('/api/content', async (req, res) => {
   }
 });
 
+app.post('/api/image', async (req, res) => {
+  if (!GEMINI_API_KEY) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY nao configurada' });
+  }
+
+  const prompt = String(req.body?.prompt || '').trim();
+  const model = String(req.body?.model || GEMINI_IMAGE_MODEL).trim();
+
+  if (!prompt) {
+    return res.status(400).json({ error: 'prompt obrigatorio' });
+  }
+
+  try {
+    const response = await axios.post(
+      'https://generativelanguage.googleapis.com/v1beta/interactions',
+      {
+        model,
+        input: [
+          {
+            type: 'text',
+            text: prompt
+          }
+        ]
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': GEMINI_API_KEY
+        },
+        timeout: 90000
+      }
+    );
+
+    const imagem = encontrarImagemGemini(response.data);
+    if (!imagem?.data) {
+      return res.status(502).json({
+        error: 'Gemini nao retornou imagem',
+        detail: response.data?.error?.message || 'Sem output_image na resposta'
+      });
+    }
+
+    res.json({
+      model,
+      mimeType: imagem.mimeType,
+      imageBase64: imagem.data,
+      dataUrl: `data:${imagem.mimeType};base64,${imagem.data}`
+    });
+  } catch (e) {
+    const detail = e.response?.data || e.message;
+    console.error('Erro /api/image:', JSON.stringify(detail));
+    res.status(e.response?.status || 500).json({ error: 'Falha ao gerar imagem no Gemini.', detail });
+  }
+});
+
 app.get('/conversas', (req, res) => {
   const resumo = Object.entries(conversas).map(([id, msgs]) => ({
     usuario: id,
@@ -285,7 +376,9 @@ app.get('/debug/config', (req, res) => res.json({
   instagram_token_length: INSTAGRAM_TOKEN.length,
   instagram_token_sha12: hash12(INSTAGRAM_TOKEN),
   instagram_account_id: Boolean(INSTAGRAM_ACCOUNT_ID),
-  webhook_verify_token: Boolean(WEBHOOK_VERIFY_TOKEN)
+  webhook_verify_token: Boolean(WEBHOOK_VERIFY_TOKEN),
+  gemini: Boolean(GEMINI_API_KEY),
+  gemini_image_model: GEMINI_IMAGE_MODEL
 }));
 
 app.get('/debug/webhook', (req, res) => res.json(webhookDebug));
@@ -296,6 +389,8 @@ app.get('/', (req, res) => res.json({
   sebastiana: ANTHROPIC_API_KEY ? 'ativa' : 'sem chave',
   instagram: INSTAGRAM_TOKEN ? 'configurado' : 'sem token',
   instagram_account_id: INSTAGRAM_ACCOUNT_ID ? 'configurado' : 'sem account id',
+  gemini_imagem: GEMINI_API_KEY ? 'configurado' : 'sem chave',
+  gemini_image_model: GEMINI_IMAGE_MODEL,
   conversas_ativas: Object.keys(conversas).length
 }));
 
